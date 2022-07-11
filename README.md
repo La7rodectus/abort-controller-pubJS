@@ -21,7 +21,7 @@ All the code that will be provided can be found [here](https://github.com/La7rod
 
 ### Basic API usage
 
-<font color="yellow">**1-basic.js**</font>
+<font color="yellow">**1-basic**</font>
 
 So as a base we have a class whose constructor takes no parameters, but instead has a <font color="yellow">signal</font> field. The instance of the class has an <font color="green">abort</font> method, which aborts (sends an event to the attached <font color="yellow">signal</font>) our process.
 
@@ -116,4 +116,65 @@ execRequest(signal);
 Promise.all(Array(2).fill().map(() => execRequest(signal)));
 
 ac.abort()
+```
+
+### Implementation of abortable contract
+
+<font color="yellow">**4-abortable**</font>
+
+Let's consider the case where we have a large piece of user-triggered asynchronous logic. At some point it will need to be canceled. So we can implement an abortable contract to abort all requests with a single method, which is pretty convenient.
+
+For example, we will read a file. Logic is not that important right now. First, we check whether the transmitted signal is not yet activated, and then we add a listener to the abort event.
+
+Be sure to pass the '*once*' parameter so that the listener is deleted automatically after the first call. In the same way, after working out the code, we also delete listener, even if the process was not aborted, to avoid memory losses.
+
+So under the hood we have another controller that helps to interrupt the internal logic, but it is not visible from the upper scope. So by sending one signal we can interrupt processes without knowing about their internal implementation.
+
+```js
+const fs = require('fs/promises');
+const path = require('path');
+
+const pathToFile = path.resolve(__dirname, 'file.txt');
+
+const abortable = async (options = {}) => {
+  const { signal } = options;
+
+  const iac = new AbortController();
+  const internalSignal = iac.signal;
+
+  if (signal?.aborted) throw new Error(signal.reason);
+  const abortEventListener = () => {
+    console.log('abortEventListener was called!');
+    iac.abort();
+    //some other abort logic
+  };
+  if (signal) {
+    signal.addEventListener('abort', abortEventListener, { once: true });
+  }
+
+  try {
+    const data = await fs.readFile(pathToFile, { signal: internalSignal, encoding: 'utf8' });
+    console.log('Abort haven\'t work!\n');
+    console.log(data);
+    //some other async or sync logic
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      console.log('Read file process was aborted!');
+    } else {
+      console.log('Abort haven\'t work!\n');
+      console.error(err);
+    }
+  } finally {
+    if (signal) {
+      signal.removeEventListener('abort', abortEventListener);
+    }
+  }
+};
+
+const ac = new AbortController();
+const { signal } = ac;
+
+abortable({ signal });
+
+ac.abort();
 ```
